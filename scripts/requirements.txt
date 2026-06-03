@@ -1,0 +1,8 @@
+# MindfulAI — Ingestion Pipeline Dependencies
+# Install: pip install -r scripts/requirements.txt
+
+pypdf>=4.0.0
+langchain-text-splitters>=0.2.0
+pinecone>=5.0.0
+python-dotenv>=1.0.0
+sentence-transformers>=3.0.0
