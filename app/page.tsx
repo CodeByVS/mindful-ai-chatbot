@@ -74,6 +74,8 @@ export default function HomePage() {
           throw new Error('No response body received');
         }
 
+        const modelName = response.headers.get('X-Model-Name') || undefined;
+
         // 4. Stream chunks
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -90,7 +92,7 @@ export default function HomePage() {
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assistantId
-                ? { ...msg, content: accumulatedContent }
+                ? { ...msg, content: accumulatedContent, model: modelName }
                 : msg
             )
           );

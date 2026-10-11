@@ -1,6 +1,6 @@
 import type { Message } from '@/types/chat';
 import { cn, formatTimestamp } from '@/lib/utils';
-import { User, Bot } from 'lucide-react';
+import { User, Bot, Sparkles } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -52,10 +52,21 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
           ) : (
-            <div className="prose-chat">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {message.content}
-              </ReactMarkdown>
+            <div>
+              {/* Model indicator at the top of the answer */}
+              <div className="mb-2 flex items-center gap-1.5 border-b border-surface-border/60 pb-1.5 text-[0.72rem] text-text-muted select-none">
+                <Sparkles className="h-3 w-3 text-primary shrink-0" />
+                <span className="font-semibold text-text-muted">Model:</span>
+                <span className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-[0.68rem] font-medium text-primary">
+                  {message.model || 'Qwen 3.8 27B (Groq)'}
+                </span>
+              </div>
+
+              <div className="prose-chat">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {message.content}
+                </ReactMarkdown>
+              </div>
             </div>
           )}
         </div>

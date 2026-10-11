@@ -1,4 +1,4 @@
-import { streamChatCompletion } from '@/lib/huggingface';
+import { streamChatCompletion, getActiveModelName } from '@/lib/huggingface';
 import { queryText } from '@/lib/pinecone';
 import { buildChatMessages } from '@/lib/prompts';
 import type { ChatErrorResponse, ChatRequest } from '@/types/chat';
@@ -85,7 +85,7 @@ export async function POST(request: Request): Promise<Response> {
           console.error('[chat/route] Stream error:', msg);
           controller.enqueue(
             encoder.encode(
-              '\n\n[Sorry, an error occurred while generating the response. Please try again.]',
+              `\n\n⚠️ **Error**: ${msg}`,
             ),
           );
         } finally {
@@ -100,6 +100,7 @@ export async function POST(request: Request): Promise<Response> {
         'Content-Type': 'text/plain; charset=utf-8',
         'Cache-Control': 'no-cache',
         Connection: 'keep-alive',
+        'X-Model-Name': getActiveModelName(),
       },
     });
   } catch (error: unknown) {

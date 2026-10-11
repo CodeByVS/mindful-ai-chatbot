@@ -77,6 +77,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Streaming chat completion
 // ---------------------------------------------------------------------------
 
@@ -86,18 +87,122 @@ export interface ChatMessage {
 }
 
 /**
- * Streams chat completion tokens from the configured Hugging Face LLM.
+ * Returns a human-friendly name of the model currently answering queries.
+ */
+export function getActiveModelName(usedModel?: string): string {
+  if (process.env.GROQ_API_KEY?.trim()) {
+    const model = usedModel || process.env.GROQ_MODEL?.trim() || 'openai/gpt-oss-120b';
+    return `${model} (Groq)`;
+  }
+  return `${process.env.HF_MODEL_ID ?? 'Meta-Llama-3-8B-Instruct'} (Hugging Face)`;
+}
+
+/**
+ * Streams chat completion tokens from Groq (free, high-speed LLM).
+ */
+async function* streamGroqCompletion(
+  messages: ChatMessage[],
+  onModelSelected?: (modelName: string) => void,
+): AsyncGenerator<string> {
+  const apiKey = process.env.GROQ_API_KEY?.trim();
+  const configured = process.env.GROQ_MODEL?.trim();
+  const candidates = [
+    ...(configured && configured !== 'llama-3.3-70b-versatile' ? [configured] : []),
+    'openai/gpt-oss-120b',
+    'qwen/qwen3.8-27b',
+    'openai/gpt-oss-20b',
+  ];
+
+  let res: Response | null = null;
+  let selectedModel = '';
+
+  for (const model of candidates) {
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: true,
+          max_tokens: 1024,
+          temperature: 0.7,
+        }),
+      });
+
+      if (response.ok) {
+        res = response;
+        selectedModel = model;
+        if (onModelSelected) onModelSelected(model);
+        break;
+      }
+
+      console.warn(`[Groq] Model ${model} returned status ${response.status}, trying fallback...`);
+    } catch (err) {
+      console.warn(`[Groq] Failed with model ${model}:`, err);
+    }
+  }
+
+  if (!res || !res.ok) {
+    throw new Error('Groq models are temporarily busy or unavailable. Please try again shortly.');
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('No stream response from Groq');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed === 'data: [DONE]') continue;
+      if (trimmed.startsWith('data: ')) {
+        try {
+          const json = JSON.parse(trimmed.slice(6));
+          const token = json.choices?.[0]?.delta?.content;
+          if (token) {
+            yield token;
+          }
+        } catch {
+          // ignore parse error on partial lines
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Streams chat completion tokens from either Groq or Hugging Face.
  *
  * @param messages - Array of system, user, and assistant messages in chat format.
  * @yields Individual string tokens as they arrive from the model.
  */
 export async function* streamChatCompletion(
   messages: ChatMessage[],
+  onModelSelected?: (modelName: string) => void,
 ): AsyncGenerator<string> {
   if (!messages || messages.length === 0) {
     throw new Error('Cannot run chat completion with empty messages.');
   }
 
+  // Priority 1: Groq (if GROQ_API_KEY is configured)
+  if (process.env.GROQ_API_KEY?.trim()) {
+    yield* streamGroqCompletion(messages, onModelSelected);
+    return;
+  }
+
+  // Priority 2: Hugging Face
   try {
     const hf = getClient();
 
@@ -119,6 +224,17 @@ export async function* streamChatCompletion(
     const message =
       error instanceof Error ? error.message : 'Unknown chat completion error';
     console.error('[HuggingFace] Chat completion failed:', message);
+
+    if (message.includes('no remaining credits')) {
+      throw new Error(
+        'Hugging Face has no remaining credits for Inference Providers. You can either:\n' +
+        '1. Add a free GROQ_API_KEY in .env.local (Get one free at https://console.groq.com/keys)\n' +
+        '2. Add free provider keys in your Hugging Face settings at https://hf.co/settings/inference-providers\n' +
+        '3. Add credits at https://hf.co/settings/billing'
+      );
+    }
+
     throw new Error(`Chat completion failed: ${message}`);
   }
 }
+
